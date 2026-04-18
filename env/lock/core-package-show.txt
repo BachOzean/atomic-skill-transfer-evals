@@ -1,0 +1,54 @@
+Name: lm_eval
+Version: 0.4.9.2
+Summary: A framework for evaluating language models
+Home-page: https://github.com/EleutherAI/lm-evaluation-harness
+Author: 
+Author-email: EleutherAI <contact@eleuther.ai>
+License: MIT
+Location: /data/run01/scyb494/_projects/atomic-skill-transfer-evals/.venvs/lm_eval_overlay/lib/python3.10/site-packages
+Requires: accelerate, datasets, dill, evaluate, jsonlines, more_itertools, numexpr, peft, pybind11, pytablewriter, rouge-score, sacrebleu, scikit-learn, sqlitedict, torch, tqdm-multiprocess, transformers, word2number, zstandard
+Required-by: 
+---
+Name: transformers
+Version: 4.57.1
+Summary: State-of-the-art Machine Learning for JAX, PyTorch and TensorFlow
+Home-page: https://github.com/huggingface/transformers
+Author: The Hugging Face team (past and future) with the help of all our contributors (https://github.com/huggingface/transformers/graphs/contributors)
+Author-email: transformers@huggingface.co
+License: Apache 2.0 License
+Location: /data/run01/scyb494/_projects/atomic-skill-transfer-evals/.venvs/lm_eval_overlay/lib/python3.10/site-packages
+Requires: filelock, huggingface-hub, numpy, packaging, pyyaml, regex, requests, safetensors, tokenizers, tqdm
+Required-by: compressed-tensors, lm_eval, peft, verl, vllm, xgrammar
+---
+Name: vllm
+Version: 0.17.1
+Summary: A high-throughput and memory-efficient inference and serving engine for LLMs
+Home-page: https://github.com/vllm-project/vllm
+Author: vLLM Team
+Author-email: 
+License-Expression: Apache-2.0
+Location: /data/run01/scyb494/.conda/envs/verl_cpython/lib/python3.10/site-packages
+Requires: aiohttp, anthropic, blake3, cachetools, cbor2, cloudpickle, compressed-tensors, depyf, diskcache, einops, fastapi, filelock, flashinfer-python, gguf, grpcio, grpcio-reflection, ijson, kaldi-native-fbank, lark, llguidance, lm-format-enforcer, mcp, mistral_common, model-hosting-container-standards, msgspec, ninja, numba, numpy, nvidia-cudnn-frontend, nvidia-cutlass-dsl, openai, openai-harmony, opencv-python-headless, opentelemetry-api, opentelemetry-exporter-otlp, opentelemetry-sdk, opentelemetry-semantic-conventions-ai, outlines_core, partial-json-parser, pillow, prometheus-fastapi-instrumentator, prometheus_client, protobuf, psutil, py-cpuinfo, pybase64, pydantic, python-json-logger, pyyaml, pyzmq, quack-kernels, ray, regex, requests, sentencepiece, setproctitle, tiktoken, tokenizers, torch, torchaudio, torchvision, tqdm, transformers, typing_extensions, watchfiles, xgrammar
+Required-by: 
+---
+Name: datasets
+Version: 4.6.0
+Summary: HuggingFace community-driven open-source library of datasets
+Home-page: https://github.com/huggingface/datasets
+Author: HuggingFace Inc.
+Author-email: thomas@huggingface.co
+License: Apache 2.0
+Location: /data/run01/scyb494/.conda/envs/verl_cpython/lib/python3.10/site-packages
+Requires: dill, filelock, fsspec, httpx, huggingface-hub, multiprocess, numpy, packaging, pandas, pyarrow, pyyaml, requests, tqdm, xxhash
+Required-by: evaluate, lm_eval, verl
+---
+Name: flashinfer-python
+Version: 0.6.6
+Summary: FlashInfer: Kernel Library for LLM Serving
+Home-page: https://github.com/flashinfer-ai/flashinfer
+Author: FlashInfer team
+Author-email: 
+License-Expression: Apache-2.0
+Location: /data/run01/scyb494/.conda/envs/verl_cpython/lib/python3.10/site-packages
+Requires: apache-tvm-ffi, click, einops, ninja, numpy, nvidia-cudnn-frontend, nvidia-cutlass-dsl, nvidia-ml-py, packaging, requests, tabulate, torch, tqdm
+Required-by: vllm

@@ -1,0 +1,8 @@
+{
+  "datasets": "4.6.0",
+  "flashinfer-python": "0.6.6",
+  "lm_eval": "0.4.9.2",
+  "torch": "2.10.0+cu129",
+  "transformers": "4.57.1",
+  "vllm": "0.17.1"
+}
