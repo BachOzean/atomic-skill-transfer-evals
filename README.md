@@ -12,7 +12,8 @@ Included:
 - `musr` evaluation runner
 - local `lm-eval-harness` task overrides under `lm_eval_tasks/`
 - environment bootstrap, snapshot export, and verification tooling
-- H200 non-Slurm migration notes under [docs/2026-04-18_h200_eval_migration_guide_zh.md](/data/home/scyb494/run/_projects/atomic-skill-transfer-evals/docs/2026-04-18_h200_eval_migration_guide_zh.md)
+- H200 non-Slurm migration notes under `docs/2026-04-18_h200_eval_migration_guide_zh.md`
+- 8x H100 quickstart under `docs/2026-04-23_h100_8gpu_quickstart_zh.md`
 
 Not included:
 
