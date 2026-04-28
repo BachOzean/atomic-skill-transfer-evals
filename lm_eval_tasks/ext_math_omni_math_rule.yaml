@@ -2,9 +2,9 @@ task: ext_math_omni_math_rule
 dataset_path: KbsdJames/Omni-MATH
 output_type: generate_until
 process_docs: !function utils.process_omni_math_docs
-training_split: train
+training_split: test
 validation_split: null
-test_split: train
+test_split: test
 doc_to_text: "Problem: {{problem}}\nPlease reason step by step, and put your final answer within \\boxed{}.\nAnswer:"
 doc_to_target: answer
 generation_kwargs:
