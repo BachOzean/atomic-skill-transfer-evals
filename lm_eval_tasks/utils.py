@@ -162,6 +162,16 @@ def process_hendrycks_math500_docs(dataset: datasets.Dataset) -> datasets.Datase
 def process_results(doc: dict, results: List[str]) -> Dict[str, int]:
     retval = 0
     response = results[0]
+    answer = extract_math_answer(response)
+
+    if is_equiv(answer, str(doc["answer"])):
+        retval = 1
+
+    return {"exact_match": retval}
+
+
+def extract_math_answer(response) -> str:
+    response = str(response or "")
     indices = [pos for pos, char in enumerate(response) if char == "$"]
     if len(indices) <= 1:
         answer = response
@@ -177,10 +187,36 @@ def process_results(doc: dict, results: List[str]) -> Dict[str, int]:
         except (AssertionError, IndexError):
             pass
 
-    if is_equiv(answer, str(doc["answer"])):
-        retval = 1
+    return answer
 
-    return {"exact_match": retval}
+
+def math_target_from_doc(doc: dict) -> str:
+    for key, value in doc.items():
+        if key.lower() == "answer":
+            return str(value)
+    return str(doc.get("answer") or "")
+
+
+def flatten_repeat_results(results) -> list[str]:
+    responses: list[str] = []
+    for result in results or []:
+        if isinstance(result, (list, tuple)):
+            responses.extend(str(item or "") for item in result)
+        else:
+            responses.append(str(result or ""))
+    return responses
+
+
+def process_repeat_results(doc: dict, results) -> Dict[str, float]:
+    responses = flatten_repeat_results(results)
+    target = math_target_from_doc(doc)
+    scores = [int(is_equiv(extract_math_answer(response), target)) for response in responses]
+    if not scores:
+        return {"exact_match": 0.0, "pass_at_8": 0.0}
+    return {
+        "exact_match": sum(scores) / len(scores),
+        "pass_at_8": float(any(scores)),
+    }
 
 
 def is_equiv(str1, str2, verbose=False):

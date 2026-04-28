@@ -26,6 +26,7 @@ from external_math_eval_utils import (
     load_json,
     load_jsonl,
     score_prediction,
+    split_thinking_content,
 )
 
 
@@ -129,14 +130,15 @@ def build_sample_frame(run_root: Path) -> pd.DataFrame:
             truths = candidate_ground_truths(doc, target)
             raw_output = extract_logged_text(row.get("resps"))
             filtered_output = extract_logged_text(row.get("filtered_resps"))
+            thinking_content, final_output, has_think_tags = split_thinking_content(raw_output)
             sample_metric = extract_sample_metric(row)
             if scoring_mode == "math":
-                extraction_source = filtered_output or raw_output or flatten_logged_response(row.get("filtered_resps") or row.get("resps"))
+                extraction_source = filtered_output or final_output or raw_output or flatten_logged_response(row.get("filtered_resps") or row.get("resps"))
                 extracted_prediction, parse_success = extract_prediction_text(extraction_source)
                 correct = float(score_prediction(extracted_prediction, truths))
                 parse_success_value: float | None = float(parse_success)
             else:
-                extracted_prediction = filtered_output
+                extracted_prediction = filtered_output or final_output
                 parse_success_value = float(bool(extracted_prediction)) if extracted_prediction else None
                 correct = sample_metric
             parsed_rows.append(
@@ -149,6 +151,9 @@ def build_sample_frame(run_root: Path) -> pd.DataFrame:
                     "doc_id": row.get("doc_id"),
                     "prompt": pull_prompt(row),
                     "raw_output": raw_output,
+                    "thinking_content": thinking_content,
+                    "final_output": final_output,
+                    "has_think_tags": float(has_think_tags),
                     "extracted_prediction": extracted_prediction,
                     "parse_success": parse_success_value,
                     "gold_candidates": json.dumps(truths, ensure_ascii=False),

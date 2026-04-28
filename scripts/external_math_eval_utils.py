@@ -58,6 +58,18 @@ BENCHMARK_SPECS: tuple[BenchmarkSpec, ...] = (
         candidate_task_names=("aime25", "aime_2025", "math_aime25", "ext_math_aime25"),
     ),
     BenchmarkSpec(
+        slug="aime24_repeat8",
+        display_name="AIME24 repeat8",
+        candidate_task_names=("ext_math_aime24_repeat8",),
+        enabled_by_default=False,
+    ),
+    BenchmarkSpec(
+        slug="aime25_repeat8",
+        display_name="AIME25 repeat8",
+        candidate_task_names=("ext_math_aime25_repeat8",),
+        enabled_by_default=False,
+    ),
+    BenchmarkSpec(
         slug="olympiadbench",
         display_name="OlympiadBench",
         candidate_task_names=("ext_math_olympiadbench", "olympiadbench_math_en", "olympiadbench", "olympiad_bench_math"),
@@ -324,6 +336,19 @@ def flatten_logged_response(value: Any) -> str:
             return value[0]
         return flatten_logged_response(value[0])
     return str(value)
+
+
+def split_thinking_content(text: Any) -> tuple[str, str, bool]:
+    raw = str(text or "").strip()
+    if not raw:
+        return "", "", False
+    start = raw.find("<think>")
+    end = raw.rfind("</think>")
+    if start == -1 or end == -1 or end < start:
+        return "", raw, False
+    thinking = raw[start + len("<think>") : end].strip()
+    final_output = raw[end + len("</think>") :].strip()
+    return thinking, final_output, True
 
 
 def _looks_like_numeric_score(text: str) -> bool:
