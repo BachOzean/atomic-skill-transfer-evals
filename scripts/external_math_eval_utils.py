@@ -4,8 +4,22 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
+from fractions import Fraction
 from pathlib import Path
 from typing import Any, Iterable
+
+try:
+    import sympy as _sympy
+    from sympy.parsing.sympy_parser import (
+        implicit_multiplication_application as _sympy_implicit_multiplication,
+    )
+    from sympy.parsing.sympy_parser import parse_expr as _sympy_parse_expr
+    from sympy.parsing.sympy_parser import standard_transformations as _sympy_standard_transformations
+except Exception:  # pragma: no cover
+    _sympy = None
+    _sympy_parse_expr = None
+    _sympy_standard_transformations = ()
+    _sympy_implicit_multiplication = None
 
 from math_answer_utils import last_boxed_only_string, normalize_final_answer, remove_boxed, strip_string
 from repo_config import (
@@ -70,6 +84,18 @@ BENCHMARK_SPECS: tuple[BenchmarkSpec, ...] = (
         enabled_by_default=False,
     ),
     BenchmarkSpec(
+        slug="aime24_repeat64",
+        display_name="AIME24 repeat64",
+        candidate_task_names=("ext_math_aime24_repeat64",),
+        enabled_by_default=False,
+    ),
+    BenchmarkSpec(
+        slug="aime25_repeat64",
+        display_name="AIME25 repeat64",
+        candidate_task_names=("ext_math_aime25_repeat64",),
+        enabled_by_default=False,
+    ),
+    BenchmarkSpec(
         slug="olympiadbench",
         display_name="OlympiadBench",
         candidate_task_names=("ext_math_olympiadbench", "olympiadbench_math_en", "olympiadbench", "olympiad_bench_math"),
@@ -80,10 +106,112 @@ BENCHMARK_SPECS: tuple[BenchmarkSpec, ...] = (
         candidate_task_names=("ext_math_omni_math_rule", "omni_math_rule", "omni_math", "omnimath"),
     ),
     BenchmarkSpec(
+        slug="matharena_hmmt_feb_2025",
+        display_name="MathArena HMMT Feb 2025",
+        candidate_task_names=("ext_math_matharena_hmmt_feb_2025", "matharena_hmmt_feb_2025", "hmmt_feb_2025"),
+        enabled_by_default=False,
+    ),
+    BenchmarkSpec(
+        slug="matharena_hmmt_nov_2025",
+        display_name="MathArena HMMT Nov 2025",
+        candidate_task_names=("ext_math_matharena_hmmt_nov_2025", "matharena_hmmt_nov_2025", "hmmt_nov_2025"),
+        enabled_by_default=False,
+    ),
+    BenchmarkSpec(
+        slug="matharena_brumo_2025",
+        display_name="MathArena BRUMO 2025",
+        candidate_task_names=("ext_math_matharena_brumo_2025", "matharena_brumo_2025", "brumo_2025"),
+        enabled_by_default=False,
+    ),
+    BenchmarkSpec(
+        slug="amc23",
+        display_name="AMC23",
+        candidate_task_names=("ext_math_amc23", "amc23"),
+        enabled_by_default=False,
+    ),
+    BenchmarkSpec(
+        slug="omni_math_500",
+        display_name="Omni-MATH-500",
+        candidate_task_names=("ext_math_omni_math_500", "omni_math_500", "omnimath_500"),
+        enabled_by_default=False,
+    ),
+    BenchmarkSpec(
         slug="mmlu_pro",
         display_name="MMLU-Pro",
         candidate_task_names=("mmlu_pro",),
         task_group="knowledge",
+        enabled_by_default=False,
+        default_system_instruction=None,
+        sample_scoring_mode="metric",
+    ),
+    BenchmarkSpec(
+        slug="medqa",
+        display_name="MedQA-USMLE",
+        candidate_task_names=("medqa_4options",),
+        task_group="medicine",
+        enabled_by_default=False,
+        default_system_instruction=None,
+        sample_scoring_mode="metric",
+    ),
+    BenchmarkSpec(
+        slug="medmcqa",
+        display_name="MedMCQA",
+        candidate_task_names=("medmcqa",),
+        task_group="medicine",
+        enabled_by_default=False,
+        default_system_instruction=None,
+        sample_scoring_mode="metric",
+    ),
+    BenchmarkSpec(
+        slug="pubmedqa",
+        display_name="PubMedQA",
+        candidate_task_names=("pubmedqa",),
+        task_group="medicine",
+        enabled_by_default=False,
+        default_system_instruction=None,
+        sample_scoring_mode="metric",
+    ),
+    BenchmarkSpec(
+        slug="mmlu_anatomy",
+        display_name="MMLU Anatomy",
+        candidate_task_names=("mmlu_anatomy",),
+        task_group="medicine",
+        enabled_by_default=False,
+        default_system_instruction=None,
+        sample_scoring_mode="metric",
+    ),
+    BenchmarkSpec(
+        slug="mmlu_clinical_knowledge",
+        display_name="MMLU Clinical Knowledge",
+        candidate_task_names=("mmlu_clinical_knowledge",),
+        task_group="medicine",
+        enabled_by_default=False,
+        default_system_instruction=None,
+        sample_scoring_mode="metric",
+    ),
+    BenchmarkSpec(
+        slug="mmlu_college_medicine",
+        display_name="MMLU College Medicine",
+        candidate_task_names=("mmlu_college_medicine",),
+        task_group="medicine",
+        enabled_by_default=False,
+        default_system_instruction=None,
+        sample_scoring_mode="metric",
+    ),
+    BenchmarkSpec(
+        slug="mmlu_medical_genetics",
+        display_name="MMLU Medical Genetics",
+        candidate_task_names=("mmlu_medical_genetics",),
+        task_group="medicine",
+        enabled_by_default=False,
+        default_system_instruction=None,
+        sample_scoring_mode="metric",
+    ),
+    BenchmarkSpec(
+        slug="mmlu_professional_medicine",
+        display_name="MMLU Professional Medicine",
+        candidate_task_names=("mmlu_professional_medicine",),
+        task_group="medicine",
         enabled_by_default=False,
         default_system_instruction=None,
         sample_scoring_mode="metric",
@@ -96,7 +224,7 @@ BENCHMARK_SPECS: tuple[BenchmarkSpec, ...] = (
         enabled_by_default=True,
         default_system_instruction=None,
         sample_scoring_mode="metric",
-        local_task_name="leaderboard_gpqa_diamond_local",
+        local_task_name="leaderboard_gpqa_diamond_local_gen",
     ),
     BenchmarkSpec(
         slug="musr",
@@ -266,6 +394,292 @@ def normalize_math_answer(text: Any) -> str:
     return candidate.strip()
 
 
+_TEXT_COMMANDS = ("text", "mathrm", "textrm", "mathbf", "operatorname", "mbox", "textbf")
+_UNIT_WORDS = (
+    "degree",
+    "degrees",
+    "unit",
+    "units",
+    "inch",
+    "inches",
+    "foot",
+    "feet",
+    "cm",
+    "m",
+    "meter",
+    "meters",
+    "hour",
+    "hours",
+    "minute",
+    "minutes",
+    "way",
+    "ways",
+    "dollar",
+    "dollars",
+    "cent",
+    "cents",
+)
+
+
+def unwrap_latex_text_commands(text: Any) -> str:
+    out = str(text or "")
+    previous = None
+    while previous != out:
+        previous = out
+        for command in _TEXT_COMMANDS:
+            out = re.sub(r"\\" + command + r"\{([^{}]*)\}", r"\1", out)
+    return out
+
+
+def remove_thousands_commas(text: str) -> str:
+    raw = str(text or "")
+    out = raw.replace("\\!", "")
+    if "\\!" in raw or re.fullmatch(r"\$?[+-]?\d{1,3}(?:,\d{3})+(?:\.\d+)?", out.strip()):
+        return re.sub(r"(?<=\d),(?=\d{3}\b)", "", out)
+    return out
+
+
+def normalize_base_subscripts(text: str) -> str:
+    return re.sub(r"(?<=\d)_\{?\d+\}?", "", text)
+
+
+def strip_plain_units(text: str) -> str:
+    unit_pattern = "|".join(re.escape(unit) for unit in _UNIT_WORDS)
+    out = re.sub(r"\^\{?(?:st|nd|rd|th)\}?", "", text, flags=re.IGNORECASE)
+    out = re.sub(rf"(?i)\b(?:{unit_pattern})\b(?:\^\{{?\d+\}}?)?", "", out)
+    return out
+
+
+def canonical_math_answer(text: Any) -> str:
+    candidate = str(text or "").strip()
+    boxed = maybe_boxed(candidate)
+    if boxed:
+        candidate = boxed
+    candidate = unwrap_latex_text_commands(candidate)
+    candidate = remove_thousands_commas(candidate)
+    candidate = normalize_base_subscripts(candidate)
+    candidate = strip_plain_units(candidate)
+    candidate = candidate.replace("\\dfrac", "\\frac").replace("\\tfrac", "\\frac")
+    candidate = re.sub(r"\\frac\{([^{}]+)\}([A-Za-z0-9]+)", r"\\frac{\1}{\2}", candidate)
+    candidate = candidate.replace("\\left", "").replace("\\right", "")
+    candidate = candidate.replace("\\(", "").replace("\\)", "").replace("\\[", "").replace("\\]", "")
+    candidate = candidate.replace("\\,", "").replace("\\!", "").replace("{,}", ",")
+    candidate = candidate.strip("$").strip()
+    if not re.fullmatch(r"[+-]?\.\d+", candidate):
+        candidate = candidate.rstrip(".")
+    try:
+        candidate = strip_string(candidate)
+    except Exception:
+        candidate = re.sub(r"\s+", "", candidate)
+    return candidate.strip()
+
+
+def split_top_level_commas(text: str) -> list[str]:
+    parts: list[str] = []
+    current: list[str] = []
+    depth = 0
+    for char in text:
+        if char in "([{":
+            depth += 1
+        elif char in ")]}":
+            depth = max(0, depth - 1)
+        if char == "," and depth == 0:
+            item = "".join(current).strip()
+            if item:
+                parts.append(item)
+            current = []
+        else:
+            current.append(char)
+    item = "".join(current).strip()
+    if item:
+        parts.append(item)
+    return parts
+
+
+def vector_items(text: Any) -> list[str] | None:
+    raw = unwrap_latex_text_commands(str(text or "").strip())
+    matrix_match = re.search(r"\\begin\{[bpv]?matrix\}(.+?)\\end\{[bpv]?matrix\}", raw, flags=re.DOTALL)
+    if matrix_match:
+        parts = [part.strip() for part in re.split(r"\\\\|&", matrix_match.group(1)) if part.strip()]
+        return parts if len(parts) > 1 else None
+
+    compact = remove_thousands_commas(raw)
+    if "\\infty" in compact or "\\cup" in compact or "\\cap" in compact:
+        return None
+    if compact.startswith("[") and compact.endswith("]"):
+        parts = split_top_level_commas(compact[1:-1])
+        return parts if len(parts) > 1 else None
+    if compact.startswith("(") and compact.endswith(")") and "," in compact:
+        parts = split_top_level_commas(compact[1:-1])
+        return parts if len(parts) > 1 else None
+    if "," in compact and not re.search(r"[\[\]\(\)]", compact):
+        parts = split_top_level_commas(compact)
+        return parts if len(parts) > 1 else None
+    return None
+
+
+def has_plus_minus(text: Any) -> bool:
+    candidate = str(text or "")
+    return bool(re.search(r"\\(?:pm|mp)(?![A-Za-z])", candidate))
+
+
+def replace_latex_frac(text: str) -> str | None:
+    out: list[str] = []
+    index = 0
+    while index < len(text):
+        start = text.find("\\frac", index)
+        if start == -1:
+            out.append(text[index:])
+            break
+        out.append(text[index:start])
+        pos = start + len("\\frac")
+        if pos >= len(text):
+            return None
+
+        def read_group(offset: int) -> tuple[str, int] | None:
+            if offset >= len(text):
+                return None
+            if text[offset] != "{":
+                return text[offset], offset + 1
+            depth = 0
+            for cursor in range(offset, len(text)):
+                if text[cursor] == "{":
+                    depth += 1
+                elif text[cursor] == "}":
+                    depth -= 1
+                    if depth == 0:
+                        return text[offset + 1 : cursor], cursor + 1
+            return None
+
+        numerator = read_group(pos)
+        if numerator is None:
+            return None
+        denominator = read_group(numerator[1])
+        if denominator is None:
+            return None
+        out.append(f"(({numerator[0]})/({denominator[0]}))")
+        index = denominator[1]
+    return "".join(out)
+
+
+def latexish_to_sympy_expr(text: str):
+    if _sympy is None or _sympy_parse_expr is None or _sympy_implicit_multiplication is None:
+        return None
+    candidate = str(text or "").strip()
+    if not candidate or len(candidate) > 200 or has_plus_minus(candidate):
+        return None
+    if any(
+        token in candidate
+        for token in (
+            "\\cup",
+            "\\cap",
+            "\\infty",
+            "\\le",
+            "\\ge",
+            "\\neq",
+            "\\equiv",
+            "\\pmod",
+            "\\mod",
+            "\\not",
+            "<",
+            ">",
+            "=",
+        )
+    ):
+        return None
+    if "\\begin" in candidate or "\\end" in candidate:
+        return None
+
+    candidate = replace_latex_frac(candidate)
+    if candidate is None:
+        return None
+    previous = None
+    while previous != candidate:
+        previous = candidate
+        candidate = re.sub(r"\\sqrt\{([^{}]+)\}", r"sqrt(\1)", candidate)
+    candidate = candidate.replace("\\sqrt", "sqrt")
+    candidate = candidate.replace("\\pi", "pi")
+    candidate = candidate.replace("^", "**")
+    candidate = candidate.replace("{", "(").replace("}", ")")
+    candidate = candidate.replace("\\", "")
+    candidate = candidate.replace(",", "")
+    if "__" in candidate or not re.fullmatch(r"[0-9A-Za-z_+\-*/(). ]+", candidate):
+        return None
+    if not re.search(r"[+\-*/()]|sqrt|pi", candidate):
+        return None
+    try:
+        return _sympy_parse_expr(
+            candidate,
+            transformations=_sympy_standard_transformations + (_sympy_implicit_multiplication,),
+            evaluate=True,
+        )
+    except Exception:
+        return None
+
+
+def safe_symbolic_equiv(prediction: str, truth: str) -> bool:
+    if _sympy is None:
+        return False
+    left = latexish_to_sympy_expr(prediction)
+    right = latexish_to_sympy_expr(truth)
+    if left is None or right is None:
+        return False
+    try:
+        return bool(_sympy.simplify(left - right) == 0)
+    except Exception:
+        return False
+
+
+def simple_numeric_value(text: str) -> Fraction | None:
+    candidate = str(text or "").strip()
+    frac_match = re.fullmatch(r"([+-]?)\\frac\{([+-]?\d+)\}\{([+-]?\d+)\}", candidate)
+    if frac_match:
+        denominator = int(frac_match.group(3))
+        if denominator == 0:
+            return None
+        numerator = int(frac_match.group(2))
+        if frac_match.group(1) == "-":
+            numerator *= -1
+        return Fraction(numerator, denominator)
+    if re.fullmatch(r"[+-]?(?:\d+(?:\.\d+)?|\.\d+)", candidate):
+        try:
+            return Fraction(candidate)
+        except Exception:
+            return None
+    return None
+
+
+def math_answers_equivalent(prediction: Any, truth: Any) -> bool:
+    normalized_pred = canonical_math_answer(prediction)
+    normalized_truth = canonical_math_answer(truth)
+    if normalized_pred and normalized_truth and normalized_pred == normalized_truth:
+        return True
+    if has_plus_minus(normalized_pred) or has_plus_minus(normalized_truth):
+        return False
+    if (
+        normalized_pred
+        and normalized_truth
+        and re.fullmatch(r"[A-Za-z]+", normalized_pred)
+        and re.fullmatch(r"[A-Za-z]+", normalized_truth)
+        and normalized_pred.lower() == normalized_truth.lower()
+    ):
+        return True
+
+    pred_items = vector_items(prediction)
+    truth_items = vector_items(truth)
+    if pred_items is not None or truth_items is not None:
+        if pred_items is None or truth_items is None or len(pred_items) != len(truth_items):
+            return False
+        return all(math_answers_equivalent(pred_item, truth_item) for pred_item, truth_item in zip(pred_items, truth_items))
+
+    pred_number = simple_numeric_value(normalized_pred)
+    truth_number = simple_numeric_value(normalized_truth)
+    if pred_number is not None or truth_number is not None:
+        return pred_number is not None and truth_number is not None and pred_number == truth_number
+
+    return safe_symbolic_equiv(normalized_pred or str(prediction or ""), normalized_truth or str(truth or ""))
+
+
 def flatten_truths(value: Any) -> list[str]:
     if value is None:
         return []
@@ -307,12 +721,10 @@ def candidate_ground_truths(doc: dict[str, Any] | None, target: Any) -> list[str
 
 
 def score_prediction(prediction: str, truths: Iterable[str]) -> bool:
-    normalized_pred = normalize_math_answer(prediction)
-    if not normalized_pred:
+    if not canonical_math_answer(prediction):
         return False
     for truth in truths:
-        normalized_truth = normalize_math_answer(truth)
-        if normalized_truth and normalized_pred == normalized_truth:
+        if canonical_math_answer(truth) and math_answers_equivalent(prediction, truth):
             return True
     return False
 

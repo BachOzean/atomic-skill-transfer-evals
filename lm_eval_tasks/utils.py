@@ -2,8 +2,22 @@ from __future__ import annotations
 
 import random
 import re
+from fractions import Fraction
 from pathlib import Path
 from typing import Dict, List
+
+try:
+    import sympy as _sympy
+    from sympy.parsing.sympy_parser import (
+        implicit_multiplication_application as _sympy_implicit_multiplication,
+    )
+    from sympy.parsing.sympy_parser import parse_expr as _sympy_parse_expr
+    from sympy.parsing.sympy_parser import standard_transformations as _sympy_standard_transformations
+except Exception:  # pragma: no cover
+    _sympy = None
+    _sympy_parse_expr = None
+    _sympy_standard_transformations = ()
+    _sympy_implicit_multiplication = None
 
 try:
     import datasets
@@ -45,6 +59,39 @@ def process_gpqa_docs(dataset: datasets.Dataset) -> datasets.Dataset:
         }
 
     return dataset.map(_process_doc)
+
+
+def extract_gpqa_choice(response) -> str:
+    text = str(response or "").strip()
+    patterns = (
+        r"(?i)(?:answer|final answer)\s*[:：]?\s*\(?([ABCD])\)?",
+        r"(?i)\(([ABCD])\)",
+        r"(?i)\b([ABCD])\b",
+    )
+    for pattern in patterns:
+        matches = re.findall(pattern, text)
+        if matches:
+            return f"({matches[-1].upper()})"
+    return text[:16]
+
+
+def strip_thinking_response(response) -> str:
+    text = str(response or "")
+    if "</think>" in text:
+        text = text.rsplit("</think>", 1)[-1]
+    return text.strip()
+
+
+def process_gpqa_generate_results(doc: dict, results: List[str]) -> Dict[str, int]:
+    response = results[0] if results else ""
+    prediction = extract_gpqa_choice(response)
+    return {"exact_match": int(prediction == str(doc.get("answer") or ""))}
+
+
+def process_gpqa_evalscope_generate_results(doc: dict, results: List[str]) -> Dict[str, int]:
+    response = strip_thinking_response(results[0] if results else "")
+    prediction = extract_gpqa_choice(response)
+    return {"exact_match": int(prediction == str(doc.get("answer") or ""))}
 
 
 def load_gpqa_local_dataset(gpqa_local_dataset_dir: str, dataset_name: str = "gpqa_diamond", **_kwargs):
@@ -121,7 +168,8 @@ def process_olympiadbench_docs(dataset: datasets.Dataset) -> datasets.Dataset:
             "difficulty": doc.get("difficulty"),
         }
 
-    return dataset.map(_process_doc)
+    processed = dataset.map(_process_doc)
+    return processed.filter(lambda doc: bool(str(doc.get("answer") or "").strip()))
 
 
 def process_omni_math_docs(dataset: datasets.Dataset) -> datasets.Dataset:
@@ -132,6 +180,86 @@ def process_omni_math_docs(dataset: datasets.Dataset) -> datasets.Dataset:
             "difficulty": doc.get("difficulty"),
             "source": doc.get("source"),
             "domain": doc.get("domain"),
+        }
+
+    return dataset.map(_process_doc)
+
+
+def _answer_from_boxed_solution(solution: str) -> str:
+    boxed = last_boxed_only_string(str(solution or ""))
+    if boxed is None:
+        return ""
+    try:
+        return remove_boxed(boxed) or ""
+    except (AssertionError, IndexError):
+        return ""
+
+
+_OMNI_MATH_ANSWER_LOOKUP: dict[str, str] | None = None
+
+
+def _omni_math_answer_lookup() -> dict[str, str]:
+    global _OMNI_MATH_ANSWER_LOOKUP
+    if _OMNI_MATH_ANSWER_LOOKUP is None:
+        _require_datasets()
+        full = datasets.load_dataset("KbsdJames/Omni-MATH", split="test")
+        _OMNI_MATH_ANSWER_LOOKUP = {
+            str(row.get("problem") or "").strip(): str(row.get("answer") or "")
+            for row in full
+        }
+    return _OMNI_MATH_ANSWER_LOOKUP
+
+
+def process_omni_math_500_docs(dataset: datasets.Dataset) -> datasets.Dataset:
+    answer_lookup = _omni_math_answer_lookup()
+
+    def _process_doc(doc: dict) -> dict:
+        solution = str(doc.get("solution") or "")
+        problem = str(doc.get("problem") or "")
+        return {
+            "problem": problem,
+            "solution": solution,
+            "answer": answer_lookup.get(problem.strip()) or _answer_from_boxed_solution(solution),
+            "difficulty": doc.get("difficulty"),
+            "source": doc.get("source"),
+            "domain": doc.get("domain"),
+            "subdomain": doc.get("subdomain"),
+        }
+
+    processed = dataset.map(_process_doc)
+    return processed.filter(lambda doc: bool(str(doc.get("answer") or "").strip()))
+
+
+def process_matharena_docs(dataset: datasets.Dataset) -> datasets.Dataset:
+    def _process_doc(doc: dict) -> dict:
+        return {
+            "problem_idx": doc.get("problem_idx"),
+            "problem": doc.get("problem", ""),
+            "answer": str(doc.get("answer") or ""),
+            "problem_type": doc.get("problem_type"),
+        }
+
+    return dataset.map(_process_doc)
+
+
+def process_amc23_docs(dataset: datasets.Dataset) -> datasets.Dataset:
+    def _process_doc(doc: dict) -> dict:
+        prompt = doc.get("prompt") or []
+        problem = ""
+        if isinstance(prompt, list) and prompt:
+            first = prompt[0]
+            if isinstance(first, dict):
+                problem = str(first.get("content") or "")
+            else:
+                problem = str(first or "")
+        reward_model = doc.get("reward_model") or {}
+        answer = reward_model.get("ground_truth") if isinstance(reward_model, dict) else ""
+        return {
+            "problem": problem,
+            "answer": str(answer if answer is not None else ""),
+            "data_source": doc.get("data_source"),
+            "ability": doc.get("ability"),
+            "extra_info": doc.get("extra_info"),
         }
 
     return dataset.map(_process_doc)
@@ -212,11 +340,292 @@ def process_repeat_results(doc: dict, results) -> Dict[str, float]:
     target = math_target_from_doc(doc)
     scores = [int(is_equiv(extract_math_answer(response), target)) for response in responses]
     if not scores:
-        return {"exact_match": 0.0, "pass_at_8": 0.0}
-    return {
+        return {"exact_match": 0.0, "pass_at_8": 0.0, "pass_at_64": 0.0}
+    payload = {
         "exact_match": sum(scores) / len(scores),
-        "pass_at_8": float(any(scores)),
+        f"pass_at_{len(scores)}": float(any(scores)),
     }
+    if len(scores) != 8:
+        payload.setdefault("pass_at_8", float(any(scores[:8])))
+    if len(scores) != 64:
+        payload.setdefault("pass_at_64", float(any(scores)))
+    return payload
+
+
+_TEXT_COMMANDS = ("text", "mathrm", "textrm", "mathbf", "operatorname", "mbox", "textbf")
+_UNIT_WORDS = (
+    "degree",
+    "degrees",
+    "unit",
+    "units",
+    "inch",
+    "inches",
+    "foot",
+    "feet",
+    "cm",
+    "m",
+    "meter",
+    "meters",
+    "hour",
+    "hours",
+    "minute",
+    "minutes",
+    "way",
+    "ways",
+    "dollar",
+    "dollars",
+    "cent",
+    "cents",
+)
+
+
+def _unwrap_latex_text_commands(text: str) -> str:
+    out = str(text or "")
+    previous = None
+    while previous != out:
+        previous = out
+        for command in _TEXT_COMMANDS:
+            out = re.sub(r"\\" + command + r"\{([^{}]*)\}", r"\1", out)
+    return out
+
+
+def _remove_thousands_commas(text: str) -> str:
+    raw = str(text or "")
+    out = raw.replace("\\!", "")
+    if "\\!" in raw or re.fullmatch(r"\$?[+-]?\d{1,3}(?:,\d{3})+(?:\.\d+)?", out.strip()):
+        return re.sub(r"(?<=\d),(?=\d{3}\b)", "", out)
+    return out
+
+
+def _normalize_base_subscripts(text: str) -> str:
+    # MATH final answers often accept bare digits when the problem context fixes
+    # the base, e.g. 2516 for 2516_8.
+    return re.sub(r"(?<=\d)_\{?\d+\}?", "", text)
+
+
+def _strip_plain_units(text: str) -> str:
+    unit_pattern = "|".join(re.escape(unit) for unit in _UNIT_WORDS)
+    out = re.sub(r"\^\{?(?:st|nd|rd|th)\}?", "", text, flags=re.IGNORECASE)
+    out = re.sub(rf"(?i)\b(?:{unit_pattern})\b(?:\^\{{?\d+\}}?)?", "", out)
+    return out
+
+
+def _canonical_answer(text) -> str:
+    out = str(text or "").strip()
+    boxed = last_boxed_only_string(out)
+    if boxed is not None:
+        try:
+            boxed_content = remove_boxed(boxed)
+            if boxed_content is not None:
+                out = boxed_content
+        except (AssertionError, IndexError):
+            pass
+    out = _unwrap_latex_text_commands(out)
+    out = _remove_thousands_commas(out)
+    out = _normalize_base_subscripts(out)
+    out = _strip_plain_units(out)
+    out = out.replace("\\dfrac", "\\frac").replace("\\tfrac", "\\frac")
+    out = re.sub(r"\\frac\{([^{}]+)\}([A-Za-z0-9]+)", r"\\frac{\1}{\2}", out)
+    out = out.replace("\\left", "").replace("\\right", "")
+    out = out.replace("\\(", "").replace("\\)", "").replace("\\[", "").replace("\\]", "")
+    out = out.replace("\\,", "").replace("\\!", "").replace("{,}", ",")
+    out = out.strip("$").strip()
+    if not re.fullmatch(r"[+-]?\.\d+", out):
+        out = out.rstrip(".")
+    try:
+        out = strip_string(out)
+    except Exception:
+        out = re.sub(r"\s+", "", out)
+    return out.strip()
+
+
+def _split_top_level_commas(text: str) -> list[str]:
+    parts: list[str] = []
+    current: list[str] = []
+    depth = 0
+    for char in text:
+        if char in "([{":
+            depth += 1
+        elif char in ")]}":
+            depth = max(0, depth - 1)
+        if char == "," and depth == 0:
+            item = "".join(current).strip()
+            if item:
+                parts.append(item)
+            current = []
+        else:
+            current.append(char)
+    item = "".join(current).strip()
+    if item:
+        parts.append(item)
+    return parts
+
+
+def _vector_items(text) -> list[str] | None:
+    raw = _unwrap_latex_text_commands(str(text or "").strip())
+    matrix_match = re.search(r"\\begin\{[bpv]?matrix\}(.+?)\\end\{[bpv]?matrix\}", raw, flags=re.DOTALL)
+    if matrix_match:
+        parts = [part.strip() for part in re.split(r"\\\\|&", matrix_match.group(1)) if part.strip()]
+        return parts if len(parts) > 1 else None
+
+    compact = _remove_thousands_commas(raw)
+    if "\\infty" in compact or "\\cup" in compact or "\\cap" in compact:
+        return None
+    if compact.startswith("[") and compact.endswith("]"):
+        parts = _split_top_level_commas(compact[1:-1])
+        return parts if len(parts) > 1 else None
+    if compact.startswith("(") and compact.endswith(")") and "," in compact:
+        parts = _split_top_level_commas(compact[1:-1])
+        return parts if len(parts) > 1 else None
+    if "," in compact and not re.search(r"[\[\]\(\)]", compact):
+        parts = _split_top_level_commas(compact)
+        return parts if len(parts) > 1 else None
+    return None
+
+
+def _is_semantic_list(text) -> bool:
+    return _vector_items(text) is not None
+
+
+def _has_plus_minus(text) -> bool:
+    candidate = str(text or "")
+    return bool(re.search(r"\\(?:pm|mp)(?![A-Za-z])", candidate))
+
+
+def _replace_latex_frac(text: str) -> str | None:
+    out: list[str] = []
+    index = 0
+    while index < len(text):
+        start = text.find("\\frac", index)
+        if start == -1:
+            out.append(text[index:])
+            break
+        out.append(text[index:start])
+        pos = start + len("\\frac")
+        if pos >= len(text):
+            return None
+
+        def read_group(offset: int) -> tuple[str, int] | None:
+            if offset >= len(text):
+                return None
+            if text[offset] != "{":
+                return text[offset], offset + 1
+            depth = 0
+            for cursor in range(offset, len(text)):
+                if text[cursor] == "{":
+                    depth += 1
+                elif text[cursor] == "}":
+                    depth -= 1
+                    if depth == 0:
+                        return text[offset + 1 : cursor], cursor + 1
+            return None
+
+        numerator = read_group(pos)
+        if numerator is None:
+            return None
+        denominator = read_group(numerator[1])
+        if denominator is None:
+            return None
+        out.append(f"(({numerator[0]})/({denominator[0]}))")
+        index = denominator[1]
+    return "".join(out)
+
+
+def _latexish_to_sympy_expr(text: str):
+    if _sympy is None or _sympy_parse_expr is None or _sympy_implicit_multiplication is None:
+        return None
+    candidate = str(text or "").strip()
+    if not candidate or len(candidate) > 200 or _has_plus_minus(candidate):
+        return None
+    if any(
+        token in candidate
+        for token in (
+            "\\cup",
+            "\\cap",
+            "\\infty",
+            "\\le",
+            "\\ge",
+            "\\neq",
+            "\\equiv",
+            "\\pmod",
+            "\\mod",
+            "\\not",
+            "<",
+            ">",
+            "=",
+        )
+    ):
+        return None
+    if "\\begin" in candidate or "\\end" in candidate:
+        return None
+
+    candidate = _replace_latex_frac(candidate)
+    if candidate is None:
+        return None
+    previous = None
+    while previous != candidate:
+        previous = candidate
+        candidate = re.sub(r"\\sqrt\{([^{}]+)\}", r"sqrt(\1)", candidate)
+    candidate = candidate.replace("\\sqrt", "sqrt")
+    candidate = candidate.replace("\\pi", "pi")
+    candidate = candidate.replace("^", "**")
+    candidate = candidate.replace("{", "(").replace("}", ")")
+    candidate = candidate.replace("\\", "")
+    candidate = candidate.replace(",", "")
+    if "__" in candidate or not re.fullmatch(r"[0-9A-Za-z_+\-*/(). ]+", candidate):
+        return None
+    if not re.search(r"[+\-*/()]|sqrt|pi", candidate):
+        return None
+    try:
+        return _sympy_parse_expr(
+            candidate,
+            transformations=_sympy_standard_transformations + (_sympy_implicit_multiplication,),
+            evaluate=True,
+        )
+    except Exception:
+        return None
+
+
+def _safe_symbolic_equiv(prediction: str, target: str) -> bool:
+    if _sympy is None:
+        return False
+    left = _latexish_to_sympy_expr(prediction)
+    right = _latexish_to_sympy_expr(target)
+    if left is None or right is None:
+        return False
+    try:
+        return bool(_sympy.simplify(left - right) == 0)
+    except Exception:
+        return False
+
+
+def _simple_numeric_value(text: str) -> Fraction | None:
+    candidate = str(text or "").strip()
+    frac_match = re.fullmatch(r"([+-]?)\\frac\{([+-]?\d+)\}\{([+-]?\d+)\}", candidate)
+    if frac_match:
+        denominator = int(frac_match.group(3))
+        if denominator == 0:
+            return None
+        numerator = int(frac_match.group(2))
+        if frac_match.group(1) == "-":
+            numerator *= -1
+        return Fraction(numerator, denominator)
+    if re.fullmatch(r"[+-]?(?:\d+(?:\.\d+)?|\.\d+)", candidate):
+        try:
+            return Fraction(candidate)
+        except Exception:
+            return None
+    return None
+
+
+def _has_logical_condition_tail(text) -> bool:
+    candidate = str(text or "")
+    return bool(
+        re.search(
+            r"(?i)(?:\\(?:equiv|pmod|mod)|\\text\{\s*or\s*\}|\bor\b|\bif and only if\b)",
+            candidate,
+        )
+    )
 
 
 def is_equiv(str1, str2, verbose=False):
@@ -230,9 +639,48 @@ def is_equiv(str1, str2, verbose=False):
         ss2 = strip_string(str2)
         if verbose:
             print(ss1, ss2)
-        return ss1 == ss2
+        if ss1 == ss2 and not (
+            _has_logical_condition_tail(str1)
+            or _has_logical_condition_tail(str2)
+        ):
+            return True
     except Exception:
-        return str1 == str2
+        if str1 == str2:
+            return True
+
+    normalized_1 = _canonical_answer(str1)
+    normalized_2 = _canonical_answer(str2)
+    if verbose:
+        print(normalized_1, normalized_2)
+    if normalized_1 and normalized_2 and normalized_1 == normalized_2:
+        return True
+    if _has_plus_minus(normalized_1) or _has_plus_minus(normalized_2):
+        return False
+    if (
+        normalized_1
+        and normalized_2
+        and re.fullmatch(r"[A-Za-z]+", normalized_1)
+        and re.fullmatch(r"[A-Za-z]+", normalized_2)
+        and normalized_1.lower() == normalized_2.lower()
+    ):
+        return True
+
+    vector_1 = _vector_items(str1)
+    vector_2 = _vector_items(str2)
+    if vector_1 is not None or vector_2 is not None:
+        if vector_1 is None or vector_2 is None or len(vector_1) != len(vector_2):
+            return False
+        return all(is_equiv(item_1, item_2, verbose=verbose) for item_1, item_2 in zip(vector_1, vector_2))
+
+    if _is_semantic_list(str1) != _is_semantic_list(str2):
+        return False
+
+    number_1 = _simple_numeric_value(normalized_1)
+    number_2 = _simple_numeric_value(normalized_2)
+    if number_1 is not None or number_2 is not None:
+        return number_1 is not None and number_2 is not None and number_1 == number_2
+
+    return _safe_symbolic_equiv(normalized_1 or str(str1), normalized_2 or str(str2))
 
 
 def remove_boxed(s):

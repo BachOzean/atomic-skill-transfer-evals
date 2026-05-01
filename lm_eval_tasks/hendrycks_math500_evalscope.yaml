@@ -1,0 +1,22 @@
+task: hendrycks_math500_evalscope
+dataset_path: HuggingFaceH4/MATH-500
+output_type: generate_until
+process_docs: !function utils.process_hendrycks_math500_docs
+training_split: test
+validation_split: null
+test_split: test
+doc_to_text: "{{problem}}\nPlease reason step by step, and put your final answer within \\boxed{}."
+doc_to_target: answer
+generation_kwargs:
+  until:
+    - "</s>"
+  do_sample: false
+  temperature: 0.0
+  max_gen_toks: 1024
+metric_list:
+  - metric: exact_match
+    aggregation: mean
+    higher_is_better: true
+process_results: !function utils.process_results
+metadata:
+  version: 1.0

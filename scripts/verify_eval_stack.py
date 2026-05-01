@@ -24,7 +24,20 @@ REQUIRED_TASKS = {
     "leaderboard_gpqa_diamond_local",
     "ext_math_olympiadbench",
     "ext_math_omni_math_rule",
+    "ext_math_matharena_hmmt_feb_2025",
+    "ext_math_matharena_hmmt_nov_2025",
+    "ext_math_matharena_brumo_2025",
+    "ext_math_amc23",
+    "ext_math_omni_math_500",
     "hendrycks_math500",
+    "medqa_4options",
+    "medmcqa",
+    "pubmedqa",
+    "mmlu_anatomy",
+    "mmlu_clinical_knowledge",
+    "mmlu_college_medicine",
+    "mmlu_medical_genetics",
+    "mmlu_professional_medicine",
 }
 
 

@@ -45,6 +45,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-root", default=str(DEFAULT_EVAL_ROOT), help="Root directory for benchmark outputs.")
     parser.add_argument("--run-tag", default=datetime.now().strftime("%Y%m%d_%H%M%S"), help="Run tag under the output root.")
     parser.add_argument("--models", default="base", help="Comma-separated model tags to run. Supported: base,origin_only.")
+    parser.add_argument(
+        "--model-alias",
+        action="append",
+        default=[],
+        metavar="TAG=PATH",
+        help="Add an arbitrary HF model path under TAG. When present, aliases are run instead of --models.",
+    )
     parser.add_argument("--benchmarks", default=",".join(benchmark_slugs()), help=f"Comma-separated benchmark slugs. All available: {','.join(all_benchmark_slugs())}.")
     parser.add_argument("--base-model-path", default=str(DEFAULT_BASE_MODEL_PATH), help="HF-loadable base model path.")
     parser.add_argument("--origin-only-model-path", default=os.environ.get("ORIGIN_ONLY_MODEL_PATH"), help="HF-loadable origin-only model path.")
@@ -82,6 +89,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--device", default=None, help="Optional device identifier for the hf backend.")
     parser.add_argument("--dry-run", action="store_true", help="Print commands without executing.")
+    parser.add_argument("--metadata-file-name", default="run_metadata.json", help="Metadata filename under the run root.")
     parser.add_argument("--list-tasks", action="store_true", help="List visible lm-eval tasks and exit.")
     return parser.parse_args()
 
@@ -96,7 +104,18 @@ def parse_overrides(items: list[str]) -> dict[str, str]:
     return overrides
 
 
+def parse_model_aliases(items: list[str]) -> dict[str, Path]:
+    aliases: dict[str, Path] = {}
+    for item in items:
+        key, sep, value = item.partition("=")
+        if not sep or not key.strip() or not value.strip():
+            raise ValueError(f"Invalid model alias: {item}. Expected TAG=PATH.")
+        aliases[slugify(key.strip())] = Path(value.strip()).expanduser()
+    return aliases
+
+
 def configure_cache_env(dry_run: bool) -> None:
+    os.environ.setdefault("VLLM_WORKER_MULTIPROC_METHOD", "spawn")
     cache_root = Path(os.environ.setdefault("XDG_CACHE_HOME", str(resolve_cache_root())))
     hf_home = Path(os.environ.setdefault("HF_HOME", str(cache_root / "hf")))
     hf_datasets_cache = Path(os.environ.setdefault("HF_DATASETS_CACHE", str(hf_home / "datasets")))
@@ -189,7 +208,8 @@ def resolve_task_name_and_metadata(
         local_task_name = benchmark_local_task_name(benchmark_slug)
         if not local_task_name:
             raise ValueError("GPQA local dataset override requested, but no local task is registered for gpqa_diamond.")
-        task_name = local_task_name
+        if benchmark_slug not in overrides:
+            task_name = local_task_name
         metadata[GPQA_LOCAL_METADATA_KEY] = args.gpqa_local_dataset_dir
     return task_name, metadata
 
@@ -213,6 +233,15 @@ load_dataset(dataset_path, dataset_name, split="train[:1]")
 
 
 def resolve_models(args: argparse.Namespace) -> dict[str, Path]:
+    aliases = parse_model_aliases(args.model_alias)
+    if aliases:
+        for tag, path in aliases.items():
+            if not path.exists():
+                raise FileNotFoundError(f"Model alias path does not exist for {tag}: {path}")
+            if not (path / "config.json").exists():
+                raise FileNotFoundError(f"Model alias path is missing config.json for {tag}: {path}")
+        return aliases
+
     requested = parse_csv_arg(args.models)
     unknown = sorted(set(requested) - set(MODEL_ORDER))
     if unknown:
@@ -243,6 +272,15 @@ def build_model_args(args: argparse.Namespace, model_path: Path) -> str:
         fragments.append(f"device={args.device}")
     if args.backend == "vllm":
         fragments.append(f"gpu_memory_utilization={os.environ.get('GPU_MEMORY_UTILIZATION', '0.90')}")
+        for env_name, model_arg_name in (
+            ("TENSOR_PARALLEL_SIZE", "tensor_parallel_size"),
+            ("MAX_MODEL_LEN", "max_model_len"),
+            ("MAX_NUM_SEQS", "max_num_seqs"),
+            ("SWAP_SPACE", "swap_space"),
+        ):
+            value = os.environ.get(env_name)
+            if value:
+                fragments.append(f"{model_arg_name}={value}")
     fragments.extend(args.extra_model_arg)
     return ",".join(fragments)
 
@@ -406,7 +444,7 @@ def main() -> None:
             subprocess.run(cmd, check=True)
 
     if not args.dry_run:
-        metadata_path = run_root / "run_metadata.json"
+        metadata_path = run_root / args.metadata_file_name
         with metadata_path.open("w", encoding="utf-8") as handle:
             json.dump(metadata, handle, indent=2, ensure_ascii=False)
         print(f"Saved run metadata to {metadata_path}")
